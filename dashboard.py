@@ -28,14 +28,7 @@ DEFAULT_INTERFACE = "1"
 DEFAULT_TARGET = "8.8.8.8"
 TIMEOUT_SECONDS = 2.0
 MAX_POINTS = 60
-
-
-# ============================================================
-# SESSION STATE
-# ============================================================
-
-if "running" not in st.session_state:
-    st.session_state.running = False
+MAX_EVENTS = 30
 
 
 # ============================================================
@@ -79,6 +72,13 @@ with st.sidebar:
     )
 
 
+# ============================================================
+# SESSION STATE
+# ============================================================
+
+if "running" not in st.session_state:
+    st.session_state.running = False
+
 if start:
     st.session_state.running = True
 
@@ -100,8 +100,24 @@ loss_metric = metric_col3.empty()
 behavior_metric = metric_col4.empty()
 
 chart_placeholder = st.empty()
-signal_placeholder = st.empty()
-timeline_placeholder = st.empty()
+
+st.divider()
+
+st.subheader("Latest signals")
+
+signal_cols = st.columns(5)
+
+signal_rtt = signal_cols[0].empty()
+signal_instability = signal_cols[1].empty()
+signal_sudden = signal_cols[2].empty()
+signal_burst = signal_cols[3].empty()
+signal_loss = signal_cols[4].empty()
+
+st.divider()
+
+st.subheader("Live event log")
+
+event_placeholder = st.empty()
 
 
 # ============================================================
@@ -122,13 +138,24 @@ if st.session_state.running:
     rtt_values = deque(maxlen=MAX_POINTS)
     rtt_times = deque(maxlen=MAX_POINTS)
 
-    behavior_history = deque(maxlen=20)
+    events = deque(maxlen=MAX_EVENTS)
 
     status_placeholder.info(
         f"Monitoring {target}..."
     )
 
     packet_stream = capture.start()
+
+    latest_signals = {
+        "rtt_spike": 0,
+        "rtt_instability": 0,
+        "sudden_rtt_change": 0,
+        "traffic_burst": 0,
+        "packet_loss": 0
+    }
+
+    latest_behavior = "Normal"
+
 
     try:
 
@@ -144,7 +171,7 @@ if st.session_state.running:
 
 
             # ====================================================
-            # TIMEOUT / PACKET LOSS
+            # CHECK TIMEOUTS
             # ====================================================
 
             lost_sequences = metrics.check_timeouts(
@@ -161,11 +188,39 @@ if st.session_state.running:
                     signals
                 )
 
-                behavior_history.append({
-                    "event": "Packet Loss",
-                    "behavior": result["behavior"],
-                    "status": result["status"],
-                    "match": result["match"]
+                stats = metrics.get_stats()
+
+                latest_signals = signals
+                latest_behavior = result["behavior"]
+
+                events.append({
+                    "Time": pd.Timestamp.now().strftime(
+                        "%H:%M:%S"
+                    ),
+                    "Event": "TIMEOUT",
+                    "Seq": sequence,
+                    "RTT (ms)": "—",
+                    "Average (ms)": (
+                        f"{stats['average_rtt']:.2f}"
+                        if stats["average_rtt"] is not None
+                        else "—"
+                    ),
+                    "Jitter (ms)": (
+                        f"{stats['jitter']:.2f}"
+                        if stats["jitter"] is not None
+                        else "—"
+                    ),
+                    "Loss %": f"{stats['packet_loss']:.2f}",
+                    "Signals": (
+                        f"Spike={signals['rtt_spike']} | "
+                        f"Instability={signals['rtt_instability']} | "
+                        f"Sudden={signals['sudden_rtt_change']} | "
+                        f"Burst={signals['traffic_burst']} | "
+                        f"Loss={signals['packet_loss']}"
+                    ),
+                    "Behavior": result["behavior"],
+                    "Status": result["status"],
+                    "Match %": result["match"]
                 })
 
 
@@ -195,6 +250,9 @@ if st.session_state.running:
                 if rtt is None:
                     continue
 
+
+                # Analyze BEFORE storing current RTT
+
                 signals = metrics.analyze_behavior(
                     rtt=rtt
                 )
@@ -203,23 +261,64 @@ if st.session_state.running:
                     signals
                 )
 
+                # Store after analysis
+
                 metrics.record_observation(rtt)
 
+                stats = metrics.get_stats()
+
+                latest_signals = signals
+                latest_behavior = result["behavior"]
+
+
+                # =================================================
+                # CHART DATA
+                # =================================================
+
                 rtt_values.append(rtt)
+
                 rtt_times.append(
                     pd.Timestamp.now()
                 )
 
-                behavior_history.append({
-                    "event": "Reply",
-                    "behavior": result["behavior"],
-                    "status": result["status"],
-                    "match": result["match"]
+
+                # =================================================
+                # DETAILED EVENT
+                # =================================================
+
+                events.append({
+                    "Time": pd.Timestamp.now().strftime(
+                        "%H:%M:%S"
+                    ),
+                    "Event": "REPLY",
+                    "Seq": packet.sequence,
+                    "RTT (ms)": f"{rtt:.2f}",
+                    "Average (ms)": (
+                        f"{stats['average_rtt']:.2f}"
+                        if stats["average_rtt"] is not None
+                        else "—"
+                    ),
+                    "Jitter (ms)": (
+                        f"{stats['jitter']:.2f}"
+                        if stats["jitter"] is not None
+                        else "—"
+                    ),
+                    "Loss %": f"{stats['packet_loss']:.2f}",
+                    "Signals": (
+                        f"Spike={signals['rtt_spike']} | "
+                        f"Instability={signals['rtt_instability']} | "
+                        f"Sudden={signals['sudden_rtt_change']} | "
+                        f"Burst={signals['traffic_burst']} | "
+                        f"Loss={signals['packet_loss']}"
+                    ),
+                    "Behavior": result["behavior"],
+                    "Status": result["status"],
+                    "Match %": result["match"]
                 })
 
 
             # ====================================================
-            # DASHBOARD DATA
+            # DASHBOARD METRICS
             # ====================================================
 
             stats = metrics.get_stats()
@@ -243,21 +342,10 @@ if st.session_state.running:
                 f"{loss:.2f}%"
             )
 
-            if behavior_history:
-
-                latest = behavior_history[-1]
-
-                behavior_metric.metric(
-                    "Current Behavior",
-                    latest["behavior"]
-                )
-
-            else:
-
-                behavior_metric.metric(
-                    "Current Behavior",
-                    "Normal"
-                )
+            behavior_metric.metric(
+                "Current Behavior",
+                latest_behavior
+            )
 
 
             # ====================================================
@@ -286,67 +374,48 @@ if st.session_state.running:
             # SIGNALS
             # ====================================================
 
-            signal_placeholder.subheader(
-                "Latest behavior signals"
-            )
-
-            signal_cols = signal_placeholder.columns(5)
-
-            signal_cols[0].metric(
+            signal_rtt.metric(
                 "RTT Spike",
-                signals.get("rtt_spike", 0)
-                if "signals" in locals()
-                else 0
+                latest_signals["rtt_spike"]
             )
 
-            signal_cols[1].metric(
+            signal_instability.metric(
                 "Instability",
-                signals.get("rtt_instability", 0)
-                if "signals" in locals()
-                else 0
+                latest_signals["rtt_instability"]
             )
 
-            signal_cols[2].metric(
+            signal_sudden.metric(
                 "Sudden Change",
-                signals.get("sudden_rtt_change", 0)
-                if "signals" in locals()
-                else 0
+                latest_signals["sudden_rtt_change"]
             )
 
-            signal_cols[3].metric(
+            signal_burst.metric(
                 "Traffic Burst",
-                signals.get("traffic_burst", 0)
-                if "signals" in locals()
-                else 0
+                latest_signals["traffic_burst"]
             )
 
-            signal_cols[4].metric(
+            signal_loss.metric(
                 "Packet Loss",
-                signals.get("packet_loss", 0)
-                if "signals" in locals()
-                else 0
+                latest_signals["packet_loss"]
             )
 
 
             # ====================================================
-            # RECENT BEHAVIOR
+            # EVENT LOG
             # ====================================================
 
-            if behavior_history:
+            if events:
 
-                timeline = pd.DataFrame(
-                    list(behavior_history)
+                event_data = pd.DataFrame(
+                    list(events)
                 )
 
-                timeline_placeholder.subheader(
-                    "Recent behavior"
-                )
-
-                timeline_placeholder.dataframe(
-                    timeline.iloc[::-1],
+                event_placeholder.dataframe(
+                    event_data.iloc[::-1],
                     use_container_width=True,
                     hide_index=True
                 )
+
 
 
             time.sleep(0.05)
@@ -374,13 +443,20 @@ else:
         """
         ### What LivePulse shows
 
-        - Real-time RTT
+        **Metrics**
+        - RTT
         - Jitter
         - Packet loss
-        - Behavioral signals
-        - Current behavior classification
-        - Recent behavior timeline
 
-        **Architecture:** TShark → Parser → Metrics → Behavior Signals → Behavior Matrix → Dashboard
+        **Behavior**
+        - RTT spike
+        - RTT instability
+        - Sudden RTT change
+        - Traffic burst
+        - Packet loss
+
+        **Architecture**
+
+        `TShark → Parser → Metrics → Behavioral Signals → Behavior Matrix → Dashboard`
         """
     )

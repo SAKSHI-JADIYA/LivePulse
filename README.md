@@ -1,4 +1,4 @@
-📡 LivePulse
+📡 LivePulse - LivePulse takes raw live ICMP traffic, measures how the network is behaving, converts those measurements into behavioral signals, classifies the observed behavior, and displays the reasoning in real time.
 
 Real-time network behavior monitoring from live packet traffic.
 
