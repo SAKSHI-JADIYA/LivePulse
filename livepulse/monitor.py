@@ -43,9 +43,7 @@ class LivePulseMonitor:
 
         print()
 
-
         packet_stream = self.capture.start()
-
 
         try:
 
@@ -57,9 +55,9 @@ class LivePulseMonitor:
                     continue
 
 
-                # ==========================================
+                # ====================================================
                 # ICMP REQUEST
-                # ==========================================
+                # ====================================================
 
                 if (
                     packet.icmp_type == 8
@@ -76,9 +74,9 @@ class LivePulseMonitor:
                     )
 
 
-                # ==========================================
+                # ====================================================
                 # ICMP REPLY
-                # ==========================================
+                # ====================================================
 
                 elif (
                     packet.icmp_type == 0
@@ -93,9 +91,10 @@ class LivePulseMonitor:
                         continue
 
 
-                    # ======================================
-                    # ANALYZE BEHAVIOR
-                    # ======================================
+                    # =================================================
+                    # STEP 21–22
+                    # Analyze BEFORE recording current RTT
+                    # =================================================
 
                     signals = (
                         self.metrics.analyze_behavior(
@@ -104,9 +103,10 @@ class LivePulseMonitor:
                     )
 
 
-                    # ======================================
-                    # MATRIX DECISION
-                    # ======================================
+                    # =================================================
+                    # STEP 23–24
+                    # Compare against behavior matrix
+                    # =================================================
 
                     result = (
                         self.metrics.detect_behavior(
@@ -120,9 +120,19 @@ class LivePulseMonitor:
                     )
 
 
-                    # ======================================
-                    # DISPLAY
-                    # ======================================
+                    # =================================================
+                    # STEP 25
+                    # Record observation AFTER analysis
+                    # =================================================
+
+                    self.metrics.record_observation(
+                        rtt
+                    )
+
+
+                    # =================================================
+                    # OUTPUT
+                    # =================================================
 
                     print(
                         f"← REPLY "
@@ -131,10 +141,12 @@ class LivePulseMonitor:
                     )
 
 
-                    print(
-                        f"   Average: "
-                        f"{stats['average_rtt']:.2f} ms"
-                    )
+                    if stats["average_rtt"] is not None:
+
+                        print(
+                            f"   Average: "
+                            f"{stats['average_rtt']:.2f} ms"
+                        )
 
 
                     if stats["jitter"] is not None:
@@ -158,11 +170,55 @@ class LivePulseMonitor:
                     )
 
 
-                    print(
-                        f"   Behavior: "
-                        f"{result['behavior']} "
-                        f"({result['confidence']}%)"
-                    )
+                    # =================================================
+                    # BEHAVIOR RESULT
+                    # =================================================
+
+                    if result["status"] == "Normal":
+
+                        print(
+                            "   Behavior: Normal"
+                        )
+
+                    else:
+
+                        print(
+                            f"   Behavior: "
+                            f"{result['status']} "
+                            f"{result['behavior']} "
+                            f"(Match: "
+                            f"{result['match']}%)"
+                        )
+
+
+                        if result["matched"]:
+
+                            print(
+                                "   Matched: "
+                                + ", ".join(
+                                    result["matched"]
+                                )
+                            )
+
+
+                        if result["missing"]:
+
+                            print(
+                                "   Missing: "
+                                + ", ".join(
+                                    result["missing"]
+                                )
+                            )
+
+
+                        if result["unexpected"]:
+
+                            print(
+                                "   Unexpected: "
+                                + ", ".join(
+                                    result["unexpected"]
+                                )
+                            )
 
 
                     print()
@@ -171,7 +227,6 @@ class LivePulseMonitor:
         except KeyboardInterrupt:
 
             print()
-
             print(
                 "Stopping LivePulse..."
             )
@@ -192,7 +247,6 @@ class LivePulseMonitor:
         print("=" * 60)
         print("                       SUMMARY")
         print("=" * 60)
-
 
         print(
             f"Packets received: "
@@ -230,5 +284,6 @@ class LivePulseMonitor:
                 f"Jitter: "
                 f"{stats['jitter']:.2f} ms"
             )
+
 
         print()

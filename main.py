@@ -1,7 +1,7 @@
 from livepulse.monitor import LivePulseMonitor
 
 
-INTERFACE = "1"
+INTERFACE = "4"
 
 TARGET = "8.8.8.8"
 
