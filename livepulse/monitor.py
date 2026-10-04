@@ -18,7 +18,9 @@ class LivePulseMonitor:
             target=target
         )
 
-        self.metrics = NetworkMetrics()
+        self.metrics = NetworkMetrics(
+            timeout_seconds=2.0
+        )
 
 
     def start(self):
@@ -56,6 +58,51 @@ class LivePulseMonitor:
 
 
                 # ====================================================
+                # CHECK FOR OLD REQUESTS THAT TIMED OUT
+                # ====================================================
+
+                lost_sequences = (
+                    self.metrics.check_timeouts(
+                        packet.timestamp
+                    )
+                )
+
+
+                for sequence in lost_sequences:
+
+                    signals = (
+                        self.metrics.analyze_behavior(
+                            packet_loss=True
+                        )
+                    )
+
+                    result = (
+                        self.metrics.detect_behavior(
+                            signals
+                        )
+                    )
+
+                    print(
+                        f"✕ TIMEOUT "
+                        f"seq={sequence}"
+                    )
+
+                    print(
+                        "   Packet Loss Detected"
+                    )
+
+                    print(
+                        f"   Behavior: "
+                        f"{result['status']} "
+                        f"{result['behavior']} "
+                        f"(Match: "
+                        f"{result['match']}%)"
+                    )
+
+                    print()
+
+
+                # ====================================================
                 # ICMP REQUEST
                 # ====================================================
 
@@ -83,30 +130,24 @@ class LivePulseMonitor:
                     and packet.source == self.target
                 ):
 
-                    rtt = self.metrics.process_reply(
-                        packet
+                    rtt = (
+                        self.metrics.process_reply(
+                            packet
+                        )
                     )
 
                     if rtt is None:
                         continue
 
 
-                    # =================================================
-                    # STEP 21–22
-                    # Analyze BEFORE recording current RTT
-                    # =================================================
+                    # Analyze BEFORE storing current RTT
 
                     signals = (
                         self.metrics.analyze_behavior(
-                            rtt
+                            rtt=rtt
                         )
                     )
 
-
-                    # =================================================
-                    # STEP 23–24
-                    # Compare against behavior matrix
-                    # =================================================
 
                     result = (
                         self.metrics.detect_behavior(
@@ -120,10 +161,7 @@ class LivePulseMonitor:
                     )
 
 
-                    # =================================================
-                    # STEP 25
-                    # Record observation AFTER analysis
-                    # =================================================
+                    # Store current RTT AFTER analysis
 
                     self.metrics.record_observation(
                         rtt
@@ -158,6 +196,12 @@ class LivePulseMonitor:
 
 
                     print(
+                        f"   Packet Loss: "
+                        f"{stats['packet_loss']:.2f}%"
+                    )
+
+
+                    print(
                         f"   Signals: "
                         f"RTT-Spike="
                         f"{signals['rtt_spike']} "
@@ -166,13 +210,11 @@ class LivePulseMonitor:
                         f"Sudden-Change="
                         f"{signals['sudden_rtt_change']} "
                         f"Burst="
-                        f"{signals['traffic_burst']}"
+                        f"{signals['traffic_burst']} "
+                        f"Loss="
+                        f"{signals['packet_loss']}"
                     )
 
-
-                    # =================================================
-                    # BEHAVIOR RESULT
-                    # =================================================
 
                     if result["status"] == "Normal":
 
@@ -190,7 +232,6 @@ class LivePulseMonitor:
                             f"{result['match']}%)"
                         )
 
-
                         if result["matched"]:
 
                             print(
@@ -200,7 +241,6 @@ class LivePulseMonitor:
                                 )
                             )
 
-
                         if result["missing"]:
 
                             print(
@@ -209,7 +249,6 @@ class LivePulseMonitor:
                                     result["missing"]
                                 )
                             )
-
 
                         if result["unexpected"]:
 
@@ -249,8 +288,23 @@ class LivePulseMonitor:
         print("=" * 60)
 
         print(
+            f"Total packets: "
+            f"{stats['total']}"
+        )
+
+        print(
             f"Packets received: "
             f"{stats['received']}"
+        )
+
+        print(
+            f"Packets lost: "
+            f"{stats['lost']}"
+        )
+
+        print(
+            f"Packet loss: "
+            f"{stats['packet_loss']:.2f}%"
         )
 
 
@@ -284,6 +338,5 @@ class LivePulseMonitor:
                 f"Jitter: "
                 f"{stats['jitter']:.2f} ms"
             )
-
 
         print()

@@ -12,42 +12,56 @@ BEHAVIOR_MATRIX = {
         "rtt_spike": 0,
         "rtt_instability": 0,
         "sudden_rtt_change": 0,
-        "traffic_burst": 0
+        "traffic_burst": 0,
+        "packet_loss": 0
     },
 
     "Latency Spike": {
         "rtt_spike": 1,
         "rtt_instability": 0,
         "sudden_rtt_change": 0,
-        "traffic_burst": 0
+        "traffic_burst": 0,
+        "packet_loss": 0
     },
 
     "Sudden RTT Change": {
         "rtt_spike": 0,
         "rtt_instability": 0,
         "sudden_rtt_change": 1,
-        "traffic_burst": 0
+        "traffic_burst": 0,
+        "packet_loss": 0
     },
 
     "Network Instability": {
         "rtt_spike": 1,
         "rtt_instability": 1,
         "sudden_rtt_change": 1,
-        "traffic_burst": 0
+        "traffic_burst": 0,
+        "packet_loss": 0
     },
 
     "Traffic Burst": {
         "rtt_spike": 0,
         "rtt_instability": 0,
         "sudden_rtt_change": 0,
-        "traffic_burst": 1
+        "traffic_burst": 1,
+        "packet_loss": 0
+    },
+
+    "Packet Loss": {
+        "rtt_spike": 0,
+        "rtt_instability": 0,
+        "sudden_rtt_change": 0,
+        "traffic_burst": 0,
+        "packet_loss": 1
     },
 
     "Network Stress": {
         "rtt_spike": 1,
         "rtt_instability": 1,
         "sudden_rtt_change": 1,
-        "traffic_burst": 1
+        "traffic_burst": 1,
+        "packet_loss": 1
     }
 }
 
@@ -56,7 +70,8 @@ FEATURE_NAMES = [
     "rtt_spike",
     "rtt_instability",
     "sudden_rtt_change",
-    "traffic_burst"
+    "traffic_burst",
+    "packet_loss"
 ]
 
 
@@ -66,22 +81,25 @@ FEATURE_NAMES = [
 
 class NetworkMetrics:
 
-    def __init__(self, history_size=20):
+    def __init__(
+        self,
+        history_size=20,
+        timeout_seconds=2.0
+    ):
 
-        # Request sequence -> request timestamp
+        # sequence -> request timestamp
         self.pending_requests = {}
 
-        # Previous RTT values
+        self.timeout_seconds = timeout_seconds
+
         self.rtt_history = deque(
             maxlen=history_size
         )
 
-        # Request timestamps
         self.request_times = deque(
             maxlen=history_size
         )
 
-        # Previous request intervals
         self.request_intervals = deque(
             maxlen=history_size
         )
@@ -100,8 +118,6 @@ class NetworkMetrics:
 
     def process_request(self, packet):
 
-        # Calculate interval using PREVIOUS request.
-        # The current interval is not yet added to history.
         if self.request_times:
 
             self.latest_request_interval = (
@@ -120,6 +136,40 @@ class NetworkMetrics:
         self.request_times.append(
             packet.timestamp
         )
+
+
+    # ========================================================
+    # CHECK FOR TIMEOUTS
+    # ========================================================
+
+    def check_timeouts(self, current_timestamp):
+
+        lost_sequences = []
+
+        for sequence, request_time in list(
+            self.pending_requests.items()
+        ):
+
+            elapsed = (
+                current_timestamp
+                - request_time
+            )
+
+            if elapsed >= self.timeout_seconds:
+
+                lost_sequences.append(
+                    sequence
+                )
+
+        for sequence in lost_sequences:
+
+            del self.pending_requests[
+                sequence
+            ]
+
+            self.lost += 1
+
+        return lost_sequences
 
 
     # ========================================================
@@ -147,12 +197,11 @@ class NetworkMetrics:
 
 
     # ========================================================
-    # RECORD CURRENT OBSERVATION
+    # RECORD CURRENT RTT OBSERVATION
     # ========================================================
 
     def record_observation(self, rtt):
 
-        # Current RTT is added AFTER analysis.
         self.rtt_history.append(
             rtt
         )
@@ -164,6 +213,30 @@ class NetworkMetrics:
             )
 
         self.previous_rtt = rtt
+
+
+    # ========================================================
+    # PACKET LOSS
+    # ========================================================
+
+    def get_total_packets(self):
+
+        return (
+            self.received
+            + self.lost
+        )
+
+
+    def get_packet_loss_percentage(self):
+
+        total = self.get_total_packets()
+
+        if total == 0:
+            return 0.0
+
+        return (
+            self.lost / total
+        ) * 100
 
 
     # ========================================================
@@ -228,96 +301,117 @@ class NetworkMetrics:
     # BEHAVIOR ANALYSIS
     # ========================================================
 
-    def analyze_behavior(self, rtt):
+    def analyze_behavior(
+        self,
+        rtt=None,
+        packet_loss=False
+    ):
 
         signals = {
             "rtt_spike": 0,
             "rtt_instability": 0,
             "sudden_rtt_change": 0,
-            "traffic_burst": 0
+            "traffic_burst": 0,
+            "packet_loss": 0
         }
 
         # ----------------------------------------------------
-        # We need enough PREVIOUS observations first.
+        # PACKET LOSS
         # ----------------------------------------------------
 
-        if len(self.rtt_history) >= 5:
+        if packet_loss:
 
-            average_rtt = mean(
-                self.rtt_history
-            )
+            signals["packet_loss"] = 1
 
-            deviation = stdev(
-                self.rtt_history
-            )
 
-            # -----------------------------------------------
-            # 1. RTT SPIKE
-            # -----------------------------------------------
+        # ----------------------------------------------------
+        # RTT FEATURES
+        # ----------------------------------------------------
 
-            if deviation > 0:
+        if rtt is not None:
 
-                if rtt > average_rtt + (2 * deviation):
+            if len(self.rtt_history) >= 5:
 
-                    signals["rtt_spike"] = 1
-
-            # -----------------------------------------------
-            # 2. RTT INSTABILITY
-            # -----------------------------------------------
-
-            if average_rtt > 0:
-
-                variation = (
-                    deviation / average_rtt
+                average_rtt = mean(
+                    self.rtt_history
                 )
 
-                if variation > 0.25:
+                deviation = stdev(
+                    self.rtt_history
+                )
 
-                    signals[
-                        "rtt_instability"
-                    ] = 1
+                # RTT SPIKE
 
-            # -----------------------------------------------
-            # 3. SUDDEN RTT CHANGE
-            # -----------------------------------------------
+                if deviation > 0:
 
-            if self.previous_rtt is not None:
+                    if (
+                        rtt
+                        > average_rtt
+                        + (2 * deviation)
+                    ):
 
-                change = abs(
-                    rtt - self.previous_rtt
+                        signals[
+                            "rtt_spike"
+                        ] = 1
+
+                # RTT INSTABILITY
+
+                if average_rtt > 0:
+
+                    variation = (
+                        deviation
+                        / average_rtt
+                    )
+
+                    if variation > 0.25:
+
+                        signals[
+                            "rtt_instability"
+                        ] = 1
+
+                # SUDDEN RTT CHANGE
+
+                if self.previous_rtt is not None:
+
+                    change = abs(
+                        rtt
+                        - self.previous_rtt
+                    )
+
+                    if (
+                        deviation > 0
+                        and change
+                        > 2 * deviation
+                    ):
+
+                        signals[
+                            "sudden_rtt_change"
+                        ] = 1
+
+
+            # TRAFFIC BURST
+
+            if (
+                self.latest_request_interval
+                is not None
+                and len(
+                    self.request_intervals
+                ) >= 2
+            ):
+
+                average_interval = mean(
+                    self.request_intervals
                 )
 
                 if (
-                    deviation > 0
-                    and change > 2 * deviation
+                    average_interval > 0
+                    and self.latest_request_interval
+                    < average_interval * 0.5
                 ):
 
                     signals[
-                        "sudden_rtt_change"
+                        "traffic_burst"
                     ] = 1
-
-        # ----------------------------------------------------
-        # 4. TRAFFIC BURST
-        # ----------------------------------------------------
-
-        if (
-            self.latest_request_interval is not None
-            and len(self.request_intervals) >= 2
-        ):
-
-            average_interval = mean(
-                self.request_intervals
-            )
-
-            if (
-                average_interval > 0
-                and self.latest_request_interval
-                < average_interval * 0.5
-            ):
-
-                signals[
-                    "traffic_burst"
-                ] = 1
 
         return signals
 
@@ -327,10 +421,6 @@ class NetworkMetrics:
     # ========================================================
 
     def detect_behavior(self, signals):
-
-        # ----------------------------------------------------
-        # No signals = Normal
-        # ----------------------------------------------------
 
         if all(
             signals[name] == 0
@@ -356,14 +446,11 @@ class NetworkMetrics:
 
         best_behavior = None
         best_score = -1
+
         best_matched = []
         best_missing = []
         best_unexpected = []
 
-
-        # ----------------------------------------------------
-        # Compare observed behavior against every pattern
-        # ----------------------------------------------------
 
         for behavior, pattern in BEHAVIOR_MATRIX.items():
 
@@ -382,7 +469,6 @@ class NetworkMetrics:
 
             unexpected = observed - expected
 
-            # Similarity is based on active signals.
             denominator = max(
                 len(observed),
                 len(expected)
@@ -419,10 +505,6 @@ class NetworkMetrics:
         )
 
 
-        # ----------------------------------------------------
-        # Exact match
-        # ----------------------------------------------------
-
         if (
             set(best_matched) == observed
             and not best_missing
@@ -431,17 +513,9 @@ class NetworkMetrics:
 
             status = "Detected"
 
-        # ----------------------------------------------------
-        # Partial match
-        # ----------------------------------------------------
-
         elif match_percentage >= 50:
 
             status = "Possible"
-
-        # ----------------------------------------------------
-        # Weak match
-        # ----------------------------------------------------
 
         else:
 
@@ -467,6 +541,8 @@ class NetworkMetrics:
         return {
             "received": self.received,
             "lost": self.lost,
+            "total": self.get_total_packets(),
+            "packet_loss": self.get_packet_loss_percentage(),
             "average_rtt": self.get_average_rtt(),
             "min_rtt": self.get_min_rtt(),
             "max_rtt": self.get_max_rtt(),
