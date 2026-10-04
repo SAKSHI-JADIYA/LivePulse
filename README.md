@@ -1,0 +1,1 @@
+“To develop a real-time network monitoring system that continuously measures network behavior such as latency, packet loss, and variability, establishes a baseline of normal behavior, and detects abnormal deviations that may indicate network instability or performance issues.”
