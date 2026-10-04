@@ -166,8 +166,9 @@ It is designed to be:
 -  Lightweight  
 -  Easy to inspect & extend  
 
-**LivePulse turns raw network traffic into an interpretable view of network behavior.**  
+**LivePulse's Dashboard.**  
 
----
+<img width="1912" height="1033" alt="image" src="https://github.com/user-attachments/assets/3c8ee506-a12e-4129-a2be-ad86964a25c4" />
+<img width="1911" height="1025" alt="image" src="https://github.com/user-attachments/assets/f7ccb525-b8eb-4d0e-99b0-fdde8c24df91" />
 
-Would you like me to also add **badges** (like Python version, license, build status) at the top to make it look even more professional?
+
